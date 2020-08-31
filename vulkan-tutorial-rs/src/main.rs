@@ -176,7 +176,7 @@ impl HelloTriangleApplication {
         let surface = WindowBuilder::new()
             .with_title("Vulkan")
             .with_inner_size(LogicalSize::new(f64::from(WIDTH), f64::from(HEIGHT)))
-            .with_resizable(false)
+            .with_resizable(true)
             .build_vk_surface(&event_loop, instance.clone())
             .expect("failed to create window surface");
         (event_loop, surface)
@@ -288,11 +288,12 @@ impl HelloTriangleApplication {
         }
     }
 
-    fn choose_swap_extent(capabilities: &Capabilities) -> [u32; 2] {
+    fn choose_swap_extent(capabilities: &Capabilities, surface: &Arc<Surface<Window>>) -> [u32; 2] {
         if let Some(current_extent) = capabilities.current_extent {
             return current_extent;
         } else {
-            let mut actual_extent = [WIDTH, HEIGHT];
+            let inner_size = surface.window().inner_size();
+            let mut actual_extent = [inner_size.width, inner_size.height];
             actual_extent[0] = capabilities.min_image_extent[0]
                 .max(capabilities.max_image_extent[0].min(actual_extent[0]));
             actual_extent[1] = capabilities.min_image_extent[1]
@@ -318,7 +319,7 @@ impl HelloTriangleApplication {
         let (surface_format, color_space) =
             Self::choose_swap_surface_format(&capabilities.supported_formats);
         let present_mode = Self::choose_swap_present_mode(capabilities.present_modes);
-        let extent = Self::choose_swap_extent(&capabilities);
+        let extent = Self::choose_swap_extent(&capabilities, &surface);
 
         let mut image_count = capabilities.min_image_count + 1;
         if capabilities.max_image_count.is_some()
