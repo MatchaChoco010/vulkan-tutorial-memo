@@ -1,4 +1,5 @@
 [workspace]
 members = [
   "vulkan-tutorial-rs",
+  "fadis_press",
 ]
