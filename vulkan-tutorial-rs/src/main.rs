@@ -1,21 +1,18 @@
 use std::collections::HashSet;
 use std::sync::Arc;
 use vulkano::{
+    buffer::{cpu_access::CpuAccessibleBuffer, BufferAccess, BufferUsage},
     command_buffer::{AutoCommandBuffer, AutoCommandBufferBuilder, DynamicState},
-    descriptor::PipelineLayoutAbstract,
     device::{Device, DeviceExtensions, Features, Queue},
     format::Format,
     framebuffer::{Framebuffer, FramebufferAbstract, RenderPassAbstract, Subpass},
     image::{swapchain::SwapchainImage, ImageUsage},
+    impl_vertex,
     instance::{
         debug::{DebugCallback, MessageSeverity, MessageType},
         layers_list, ApplicationInfo, Instance, InstanceExtensions, PhysicalDevice, Version,
     },
-    pipeline::{
-        vertex::{BufferlessDefinition, BufferlessVertices},
-        viewport::Viewport,
-        GraphicsPipeline,
-    },
+    pipeline::{viewport::Viewport, GraphicsPipeline, GraphicsPipelineAbstract},
     single_pass_renderpass,
     swapchain::{
         acquire_next_image, AcquireError, Capabilities, ColorSpace, CompositeAlpha,
@@ -65,11 +62,25 @@ impl QueueFamilyIndices {
     }
 }
 
-type ConcreteGraphicsPipeline = GraphicsPipeline<
-    BufferlessDefinition,
-    Box<dyn PipelineLayoutAbstract + Send + Sync + 'static>,
-    Arc<dyn RenderPassAbstract + Send + Sync + 'static>,
->;
+#[derive(Default, Copy, Clone)]
+struct Vertex {
+    pos: [f32; 2],
+    color: [f32; 3],
+}
+impl Vertex {
+    fn new(pos: [f32; 2], color: [f32; 3]) -> Self {
+        Self { pos, color }
+    }
+}
+impl_vertex!(Vertex, pos, color);
+
+fn vertices() -> [Vertex; 3] {
+    [
+        Vertex::new([0.0, -0.5], [1.0, 1.0, 1.0]),
+        Vertex::new([0.5, 0.5], [0.0, 1.0, 0.0]),
+        Vertex::new([-0.5, 0.5], [0.0, 0.0, 1.0]),
+    ]
+}
 
 struct HelloTriangleApplication {
     instance: Arc<Instance>,
@@ -84,8 +95,9 @@ struct HelloTriangleApplication {
     swap_chain: Arc<Swapchain<Window>>,
     swap_chain_images: Vec<Arc<SwapchainImage<Window>>>,
     render_pass: Arc<dyn RenderPassAbstract + Send + Sync>,
-    graphics_pipeline: Arc<ConcreteGraphicsPipeline>,
+    graphics_pipeline: Arc<dyn GraphicsPipelineAbstract + Send + Sync>,
     swap_chain_framebuffers: Vec<Arc<dyn FramebufferAbstract + Send + Sync>>,
+    vertex_buffer: Arc<dyn BufferAccess + Send + Sync>,
     command_buffers: Vec<Arc<AutoCommandBuffer>>,
     previous_frame_end: Option<Box<dyn GpuFuture>>,
     recreate_swap_chain: bool,
@@ -410,7 +422,7 @@ impl HelloTriangleApplication {
         device: &Arc<Device>,
         swap_chain_extent: [u32; 2],
         render_pass: &Arc<dyn RenderPassAbstract + Send + Sync>,
-    ) -> Arc<ConcreteGraphicsPipeline> {
+    ) -> Arc<dyn GraphicsPipelineAbstract + Send + Sync> {
         mod vertex_shader {
             vulkano_shaders::shader! {
                 ty: "vertex",
@@ -438,7 +450,7 @@ impl HelloTriangleApplication {
 
         Arc::new(
             GraphicsPipeline::start()
-                .vertex_input(BufferlessDefinition)
+                .vertex_input_single_buffer::<Vertex>()
                 .vertex_shader(vert_shader_module.main_entry_point(), ())
                 .triangle_list()
                 .primitive_restart(false)
@@ -475,17 +487,22 @@ impl HelloTriangleApplication {
             .collect::<Vec<_>>()
     }
 
+    fn create_vertex_buffer(device: &Arc<Device>) -> Arc<dyn BufferAccess + Send + Sync> {
+        CpuAccessibleBuffer::from_iter(
+            device.clone(),
+            BufferUsage::vertex_buffer(),
+            false,
+            vertices().iter().cloned(),
+        )
+        .unwrap()
+    }
+
     fn create_command_buffers(&mut self) {
         let queue_family = self.graphics_queue.family();
         self.command_buffers = self
             .swap_chain_framebuffers
             .iter()
             .map(|framebuffer| {
-                let vertices = BufferlessVertices {
-                    vertices: 3,
-                    instances: 1,
-                };
-
                 let mut builder = AutoCommandBufferBuilder::primary_simultaneous_use(
                     self.device.clone(),
                     queue_family,
@@ -501,7 +518,7 @@ impl HelloTriangleApplication {
                     .draw(
                         self.graphics_pipeline.clone(),
                         &DynamicState::none(),
-                        vertices,
+                        vec![self.vertex_buffer.clone()],
                         (),
                         (),
                     )
@@ -540,6 +557,7 @@ impl HelloTriangleApplication {
         let graphics_pipeline =
             Self::create_graphics_pipeline(&device, swap_chain.dimensions(), &render_pass);
         let swap_chain_framebuffers = Self::create_framebuffers(&swap_chain_images, &render_pass);
+        let vertex_buffer = Self::create_vertex_buffer(&device);
         let previous_frame_end = Some(Self::create_sync_objects(&device));
         let mut app = Self {
             instance,
@@ -555,6 +573,7 @@ impl HelloTriangleApplication {
             render_pass,
             graphics_pipeline,
             swap_chain_framebuffers,
+            vertex_buffer,
             command_buffers: vec![],
             previous_frame_end,
             recreate_swap_chain: false,
