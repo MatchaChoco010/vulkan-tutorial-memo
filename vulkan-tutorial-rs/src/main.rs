@@ -1,7 +1,7 @@
 use std::collections::HashSet;
 use std::sync::Arc;
 use vulkano::{
-    buffer::{cpu_access::CpuAccessibleBuffer, BufferAccess, BufferUsage},
+    buffer::{immutable::ImmutableBuffer, BufferAccess, BufferUsage},
     command_buffer::{AutoCommandBuffer, AutoCommandBufferBuilder, DynamicState},
     device::{Device, DeviceExtensions, Features, Queue},
     format::Format,
@@ -487,14 +487,15 @@ impl HelloTriangleApplication {
             .collect::<Vec<_>>()
     }
 
-    fn create_vertex_buffer(device: &Arc<Device>) -> Arc<dyn BufferAccess + Send + Sync> {
-        CpuAccessibleBuffer::from_iter(
-            device.clone(),
-            BufferUsage::vertex_buffer(),
-            false,
+    fn create_vertex_buffer(graphics_queue: &Arc<Queue>) -> Arc<dyn BufferAccess + Send + Sync> {
+        let (buffer, future) = ImmutableBuffer::from_iter(
             vertices().iter().cloned(),
+            BufferUsage::vertex_buffer(),
+            graphics_queue.clone(),
         )
-        .unwrap()
+        .unwrap();
+        future.flush().unwrap();
+        buffer
     }
 
     fn create_command_buffers(&mut self) {
@@ -557,7 +558,7 @@ impl HelloTriangleApplication {
         let graphics_pipeline =
             Self::create_graphics_pipeline(&device, swap_chain.dimensions(), &render_pass);
         let swap_chain_framebuffers = Self::create_framebuffers(&swap_chain_images, &render_pass);
-        let vertex_buffer = Self::create_vertex_buffer(&device);
+        let vertex_buffer = Self::create_vertex_buffer(&graphics_queue);
         let previous_frame_end = Some(Self::create_sync_objects(&device));
         let mut app = Self {
             instance,
